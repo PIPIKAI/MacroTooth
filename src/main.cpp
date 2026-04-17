@@ -1,11 +1,9 @@
-#include "uhid_device.h"
+#include "gatt_application.h"
 #include "hid_reporter.h"
-#include "bluez_profile.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
 #include <signal.h>
-#include <unistd.h>
 
 // HID Report Descriptor - 键盘 + 鼠标组合
 static const uint8_t hid_report_desc[] = {
@@ -70,79 +68,64 @@ void signalHandler(int signum) {
     running = false;
 }
 
+// Dispatch D-Bus messages for the given duration while remaining interruptible.
+static void dispatchFor(GattApplication& gatt, std::chrono::milliseconds total) {
+    auto deadline = std::chrono::steady_clock::now() + total;
+    while (running && std::chrono::steady_clock::now() < deadline)
+        gatt.dispatch(10);
+}
+
 int main() {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
-    
-    // 1. 创建 UHID 设备
-    UHIDDevice uhid;
-    HIDReporter hid;
-    
-    if (!uhid.create("MacroTooth HID", 
-                    "00:11:22:33:44:55",
-                    hid_report_desc, 
-                    sizeof(hid_report_desc),
-                    0x1234,  // Vendor ID
-                    0x5678)) { // Product ID
-        std::cerr << "Failed to create UHID device" << std::endl;
+
+    HIDReporter    hid;
+    GattApplication gatt;
+
+    // Register GATT application and start BLE advertisement.
+    if (!gatt.start(hid_report_desc, sizeof(hid_report_desc))) {
+        std::cerr << "Failed to start BLE GATT application" << std::endl;
         return 1;
     }
-    
-    std::cout << "UHID device created successfully!" << std::endl;
-    
-    // 设置回调处理主机数据（如键盘 LED 状态）
-    uhid.setDataCallback([](const uint8_t* data, size_t len) {
-        std::cout << "Received data from host, length: " << len << std::endl;
-        // 这里可以处理键盘 LED 状态
+
+    std::cout << "BLE HID device is ready!" << std::endl;
+    std::cout << "Advertising as 'MacroTooth' – connect with a BLE host." << std::endl;
+
+    // Called when the host sends an Output report (e.g. keyboard LED state).
+    gatt.setOutputReportCallback([](const uint8_t* data, size_t len) {
+        std::cout << "Output report from host, length: " << len << std::endl;
     });
-    
-    uhid.setControlCallback([](uint8_t event, const uint8_t* data, size_t len) {
-        if (event == UHID_GET_REPORT) {
-            std::cout << "GET_REPORT request received" << std::endl;
-        } else if (event == UHID_SET_REPORT) {
-            std::cout << "SET_REPORT request received, length: " << len << std::endl;
-        }
-    });
-    
-    // 2. 注册 BlueZ HID Profile
-    BlueZProfile profile;
-    if (!profile.registerHIDProfile()) {
-        std::cerr << "Failed to register HID profile" << std::endl;
-        return 1;
-    }
-    
-    std::cout << "HID Profile registered. Device is ready!" << std::endl;
-    std::cout << "You can now connect to this device via Bluetooth." << std::endl;
-    
-    // 3. 演示：模拟一些按键和鼠标操作
+
+    // Demo: repeatedly send 'H' then 'e' once a BLE host has connected and
+    // enabled notifications.  D-Bus messages are dispatched between key
+    // events so that BlueZ read/write requests are handled promptly.
     std::cout << "\nStarting demo in 3 seconds..." << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-    
+    dispatchFor(gatt, std::chrono::seconds(3));
+
     while (running) {
         std::cout << "Typing 'H'" << std::endl;
-    
-        // 手动发送 'H'
+
         hid.keyPress(HIDReporter::HID_KEY_H);
-        uhid.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
+        gatt.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
+        dispatchFor(gatt, std::chrono::milliseconds(100));
+
         hid.keyRelease();
-        uhid.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
+        gatt.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
+        dispatchFor(gatt, std::chrono::milliseconds(100));
+
         std::cout << "Typing 'e'" << std::endl;
         hid.keyPress(HIDReporter::HID_KEY_E);
-        uhid.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
+        gatt.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
+        dispatchFor(gatt, std::chrono::milliseconds(100));
+
         hid.keyRelease();
-        uhid.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
-        
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        gatt.sendInputReport(hid.getKeyboardReport(), hid.getKeyboardReportSize());
+
+        dispatchFor(gatt, std::chrono::seconds(2));
     }
-    
+
     std::cout << "Shutting down..." << std::endl;
-    uhid.destroy();
-    
+    gatt.stop();
+
     return 0;
 }
