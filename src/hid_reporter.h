@@ -2,9 +2,10 @@
 #define HID_REPORTER_H
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 #include <array>
-#include <string>  // 添加缺失的头文件
+#include <string>
 
 // 避免与 Linux input.h 中的宏冲突
 #ifdef KEY_A
@@ -265,6 +266,12 @@ public:
     
     HIDReporter();
     
+    // Optional callback invoked by typeString() after each key press and
+    // release so the caller does not need to poll the report buffer.
+    // Signature: bool send(const uint8_t* data, size_t len)
+    using SendReportCallback = std::function<bool(const uint8_t*, size_t)>;
+    void setSendCallback(SendReportCallback cb) { send_cb_ = cb; }
+    
     // 键盘操作
     void keyPress(KeyCode key, Modifier mod = MOD_NONE);
     void keyRelease();
@@ -286,6 +293,8 @@ public:
 private:
     std::array<uint8_t, 8> keyboard_report_;
     std::array<uint8_t, 4> mouse_report_;
+    
+    SendReportCallback send_cb_;
     
     uint8_t charToKeyCode(char c);
 };

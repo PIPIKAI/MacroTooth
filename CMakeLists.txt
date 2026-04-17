@@ -29,6 +29,10 @@ set(SOURCES
     src/main.cpp
     src/hid_reporter.cpp
     src/gatt_application.cpp
+    src/bluez_profile.cpp
+    src/bt_adapter.cpp
+    src/bt_agent.cpp
+    src/ipc_server.cpp
 )
 
 # 创建可执行文件

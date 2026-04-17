@@ -1,10 +1,12 @@
 #include "bluez_profile.h"
+#include "logger.h"
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
 #include <thread>
+#include <vector>
 
-BlueZProfile::BlueZProfile() : conn_(nullptr) {
+BlueZProfile::BlueZProfile() : conn_(nullptr), interrupt_fd_(-1) {
 }
 
 BlueZProfile::~BlueZProfile() {
@@ -40,37 +42,44 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
     BlueZProfile* self = static_cast<BlueZProfile*>(user_data);
     
     if (dbus_message_is_method_call(msg, "org.bluez.Profile1", "NewConnection")) {
-        std::cout << "New Bluetooth connection request" << std::endl;
+        LOG_I("BlueZProfile: new Classic BT HID connection");
         
-        // 解析参数
+        // Parse arguments: device_path (o), fd (h), fd_properties (a{sv})
         DBusMessageIter args;
         if (!dbus_message_iter_init(msg, &args)) {
             return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
         }
         
-        // 参数1: device 对象路径
         const char* device_path;
         dbus_message_iter_get_basic(&args, &device_path);
         dbus_message_iter_next(&args);
         
-        // 参数2: fd (文件描述符)
         DBusBasicValue fd_value;
         dbus_message_iter_get_basic(&args, &fd_value);
-        int fd = fd_value.fd;
+        int new_fd = fd_value.fd;
         
-        std::cout << "Device connected: " << device_path << ", fd: " << fd << std::endl;
+        LOG_I("BlueZProfile: device connected: %s, fd=%d", device_path, new_fd);
         
-        // 重要：这里需要读取 fd 并转发给 UHID
-        // 启动一个线程来处理 HID 数据
-        std::thread([fd]() {
-            uint8_t buffer[1024];
+        // Close any previous connection FD.
+        int old_fd = self->interrupt_fd_.exchange(new_fd);
+        if (old_fd >= 0)
+            close(old_fd);
+        
+        // Read output reports (e.g. LED state) from the host in a background thread.
+        std::thread([self, new_fd]() {
+            uint8_t buffer[64];
             while (true) {
-                ssize_t len = read(fd, buffer, sizeof(buffer));
+                ssize_t len = read(new_fd, buffer, sizeof(buffer));
                 if (len <= 0) break;
-                // 处理接收到的数据
-                std::cout << "Received " << len << " bytes from HID host" << std::endl;
+                LOG_D("BlueZProfile: received %zd bytes from host", len);
             }
-            close(fd);
+            // Connection closed – clear the stored FD if it is still ours.
+            int expected = new_fd;
+            self->interrupt_fd_.compare_exchange_strong(expected, -1);
+            close(new_fd);
+            LOG_I("BlueZProfile: Classic BT HID connection closed");
+            if (self->conn_callback_)
+                self->conn_callback_(false);
         }).detach();
 
         // 发送成功响应
@@ -87,14 +96,18 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
         return DBUS_HANDLER_RESULT_HANDLED;
         
     } else if (dbus_message_is_method_call(msg, "org.bluez.Profile1", "RequestDisconnection")) {
-        std::cout << "Bluetooth disconnection request" << std::endl;
+        LOG_I("BlueZProfile: RequestDisconnection");
         
         DBusMessageIter args;
         dbus_message_iter_init(msg, &args);
         const char* device_path;
         dbus_message_iter_get_basic(&args, &device_path);
         
-        std::cout << "Device disconnecting: " << device_path << std::endl;
+        LOG_I("BlueZProfile: device disconnecting: %s", device_path);
+        
+        // Close and clear the interrupt FD.
+        int fd = self->interrupt_fd_.exchange(-1);
+        if (fd >= 0) close(fd);
         
         DBusMessage* reply = dbus_message_new_method_return(msg);
         if (reply) {
@@ -109,7 +122,7 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
         return DBUS_HANDLER_RESULT_HANDLED;
         
     } else if (dbus_message_is_method_call(msg, "org.bluez.Profile1", "Release")) {
-        std::cout << "Profile Release called" << std::endl;
+        LOG_I("BlueZProfile: Release called");
         DBusMessage* reply = dbus_message_new_method_return(msg);
         if (reply) {
             dbus_connection_send(conn, reply, nullptr);
@@ -118,7 +131,7 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
         return DBUS_HANDLER_RESULT_HANDLED;
         
     } else if (dbus_message_is_method_call(msg, "org.bluez.Profile1", "Cancel")) {
-        std::cout << "Profile Cancel called" << std::endl;
+        LOG_I("BlueZProfile: Cancel called");
         DBusMessage* reply = dbus_message_new_method_return(msg);
         if (reply) {
             dbus_connection_send(conn, reply, nullptr);
@@ -167,12 +180,35 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
+// ── sendInputReport ───────────────────────────────────────────────────────────
+
+bool BlueZProfile::sendInputReport(const uint8_t* data, size_t len) {
+    int fd = interrupt_fd_.load();
+    if (fd < 0) return false;
+
+    // Classic BT HID interrupt channel format:
+    //   byte 0: 0xA1  (DATA message, INPUT report type)
+    //   bytes 1..N: report payload
+    std::vector<uint8_t> buf;
+    buf.reserve(1 + len);
+    buf.push_back(0xA1);
+    buf.insert(buf.end(), data, data + len);
+
+    ssize_t written = write(fd, buf.data(), buf.size());
+    if (written != static_cast<ssize_t>(buf.size())) {
+        LOG_E("BlueZProfile: sendInputReport write failed (wrote %zd of %zu)",
+              written, buf.size());
+        return false;
+    }
+    return true;
+}
+
 bool BlueZProfile::registerHIDProfile() {
     if (!createDbusConnection()) {
         return false;
     }
     
-    // 注册对象路径
+    // Register object path
     DBusObjectPathVTable vtable;
     memset(&vtable, 0, sizeof(vtable));
     vtable.message_function = messageHandler;
@@ -183,11 +219,11 @@ bool BlueZProfile::registerHIDProfile() {
                                              profile_path,
                                              &vtable,
                                              this)) {
-        std::cerr << "Failed to register object path" << std::endl;
+        LOG_E("BlueZProfile: failed to register object path");
         return false;
     }
     
-    std::cout << "Object path registered: " << profile_path << std::endl;
+    LOG_I("BlueZProfile: object path registered: %s", profile_path);
     
     // 关键修复：ProfileManager1 的正确对象路径是 /org/bluez，不是 /org/bluez/hci0
     DBusMessage* msg = dbus_message_new_method_call(
@@ -296,7 +332,7 @@ bool BlueZProfile::registerHIDProfile() {
     dbus_message_unref(msg);
     
     if (dbus_error_is_set(&error)) {
-        std::cerr << "D-Bus error: " << error.message << std::endl;
+        LOG_E("BlueZProfile: RegisterProfile D-Bus error: %s", error.message);
         dbus_error_free(&error);
         return false;
     }
@@ -305,21 +341,22 @@ bool BlueZProfile::registerHIDProfile() {
         dbus_message_unref(reply);
     }
     
-    std::cout << "HID Profile registered successfully!" << std::endl;
+    LOG_I("BlueZProfile: HID profile registered successfully");
     return true;
 }
 
 void BlueZProfile::unregisterProfile() {
     if (!conn_) return;
     
-    // 先取消注册对象路径
+    // Close the interrupt FD if still open.
+    int fd = interrupt_fd_.exchange(-1);
+    if (fd >= 0) close(fd);
+    
     dbus_connection_unregister_object_path(conn_, "/com/macrotooth/hid");
     
-    // 然后通知 BlueZ 取消注册 Profile
-    // 注意：UnregisterProfile 的正确对象路径也是 /org/bluez
     DBusMessage* msg = dbus_message_new_method_call(
         "org.bluez",
-        "/org/bluez",                       // 正确的对象路径
+        "/org/bluez",
         "org.bluez.ProfileManager1",
         "UnregisterProfile"
     );
@@ -331,7 +368,6 @@ void BlueZProfile::unregisterProfile() {
         const char* profile_path = "/com/macrotooth/hid";
         dbus_message_iter_append_basic(&args, DBUS_TYPE_OBJECT_PATH, &profile_path);
         
-        // 直接发送，不等待回复
         dbus_connection_send(conn_, msg, nullptr);
         dbus_connection_flush(conn_);
         dbus_message_unref(msg);

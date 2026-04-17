@@ -67,16 +67,19 @@ void HIDReporter::typeString(const std::string& text, int delay_ms) {
         }
         
         if (keycode != HID_KEY_NONE) {
-            // 按下
+            // Press
             keyPress(static_cast<KeyCode>(keycode), mod);
-            // 发送按下报告
-            // 注意：这里需要在外部调用 sendInputReport
+            if (send_cb_)
+                send_cb_(keyboard_report_.data(), keyboard_report_.size());
             
             std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
             
-            // 释放
+            // Release
             keyRelease();
-            // 发送释放报告
+            if (send_cb_)
+                send_cb_(keyboard_report_.data(), keyboard_report_.size());
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
         }
     }
 }

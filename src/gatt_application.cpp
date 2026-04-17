@@ -36,9 +36,9 @@ static const uint16_t BLE_APPEARANCE_KEYBOARD = 0x03C1;
 static const uint8_t HID_BCD_LO = 0x11;
 static const uint8_t HID_BCD_HI = 0x01;
 
-// Placeholder vendor / product IDs – replace with real values for production.
-// VID source 0x02 = USB IF assigned; VID = 0x1234, PID = 0x5678, version = 0x0100.
-static const uint8_t PNP_ID_BYTES[] = {0x02, 0x34, 0x12, 0x78, 0x56, 0x00, 0x01};
+// Logitech K380 Multi-Device Keyboard identity.
+// VID source 0x01 = Bluetooth SIG, VID = 0x046D (Logitech), PID = 0xB342 (K380).
+static const uint8_t PNP_ID_BYTES[] = {0x01, 0x6D, 0x04, 0x42, 0xB3, 0x01, 0x00};
 
 // ── Static D-Bus variant / property helpers ───────────────────────────────────
 
@@ -192,7 +192,9 @@ GattApplication::~GattApplication() {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-bool GattApplication::start(const uint8_t* report_desc, size_t len) {
+bool GattApplication::start(const uint8_t* report_desc, size_t len,
+                             const std::string& device_name) {
+    device_name_ = device_name;
     {
         std::lock_guard<std::mutex> lk(mutex_);
         report_desc_.assign(report_desc, report_desc + len);
@@ -538,7 +540,7 @@ void GattApplication::appendManagedObjects(DBusMessage* reply) {
     static const uint8_t HID_INFO[]    = {HID_BCD_LO, HID_BCD_HI, 0x00, 0x02};
     static const uint8_t HID_CP_VAL[]  = {0x00};
     static const uint8_t REPORT_REF[]  = {0x00, 0x01};  // Report ID=0, Type=Input(1)
-    static const char    MFR_NAME[]    = "MacroTooth";
+    static const char    MFR_NAME[]    = "Logitech";
 
     DBusMessageIter iter;
     dbus_message_iter_init_append(reply, &iter);
@@ -697,7 +699,7 @@ DBusMessage* GattApplication::handleCharacteristicRead(DBusMessage* msg,
     // bcdHID=HID 1.11, bCountryCode=0x00, Flags=0x02 (Normally Connectable)
     static const uint8_t HID_INFO[]   = {HID_BCD_LO, HID_BCD_HI, 0x00, 0x02};
     static const uint8_t HID_CP_VAL[] = {0x00};
-    static const char    MFR_NAME[]   = "MacroTooth";
+    static const char    MFR_NAME[]   = "Logitech";
 
     std::vector<uint8_t> value;
     {
@@ -774,6 +776,7 @@ DBusMessage* GattApplication::handleStartNotify(DBusMessage* msg) {
         notify_enabled_ = true;
     }
     std::cout << "HID report notifications enabled" << std::endl;
+    if (conn_cb_) conn_cb_(true);
     return dbus_message_new_method_return(msg);
 }
 
@@ -783,6 +786,7 @@ DBusMessage* GattApplication::handleStopNotify(DBusMessage* msg) {
         notify_enabled_ = false;
     }
     std::cout << "HID report notifications disabled" << std::endl;
+    if (conn_cb_) conn_cb_(false);
     return dbus_message_new_method_return(msg);
 }
 
@@ -829,7 +833,7 @@ DBusMessage* GattApplication::handleGetAllProperties(DBusMessage* msg,
         // LEAdvertisement1 properties
         const char* type       = "peripheral";
         const char* svc_uuids[] = {UUID_HID_SVC};
-        const char* name       = "MacroTooth";
+        const char* name       = device_name_.c_str();
         propStr (&props, "Type",          type);
         propAs  (&props, "ServiceUUIDs",  svc_uuids, 1);
         propStr (&props, "LocalName",     name);
