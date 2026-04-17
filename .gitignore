@@ -1,0 +1,25 @@
+# Node modules
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+.venv/
+
+# Environment variables
+.env
+
+# Distribution and build directories
+dist/
+build/
+
+# macOS specific files
+.DS_Store
+
+# Backend specific macros
+backend/data/macros/*
+
+# Virtual environment
+venv/
+
+build/
