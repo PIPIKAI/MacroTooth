@@ -59,8 +59,12 @@ bool IpcServer::start(const std::string& socket_path) {
 void IpcServer::stop() {
     if (!running_.exchange(false)) return;
 
-    // Close the server socket so accept() unblocks.
+    // Shut down and close the server socket so any blocked accept() call in
+    // the accept thread returns immediately.  shutdown() must precede close()
+    // because on Linux close() alone does not reliably interrupt a blocking
+    // accept() call running in another thread.
     if (server_fd_ >= 0) {
+        shutdown(server_fd_, SHUT_RDWR);
         close(server_fd_);
         server_fd_ = -1;
     }
