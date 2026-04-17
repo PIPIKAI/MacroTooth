@@ -23,3 +23,4 @@ backend/data/macros/*
 venv/
 
 build/build_ci/
+build_ci/
