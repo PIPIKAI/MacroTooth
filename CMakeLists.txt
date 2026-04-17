@@ -44,3 +44,6 @@ target_link_libraries(macrotooth
     ${GLIB_LIBRARIES}
     pthread
 )
+
+# ── 单元测试 ───────────────────────────────────────────────────────────────────
+add_subdirectory(tests)
