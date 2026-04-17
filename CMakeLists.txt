@@ -27,9 +27,8 @@ include_directories(
 # 源文件
 set(SOURCES
     src/main.cpp
-    src/uhid_device.cpp
     src/hid_reporter.cpp
-    src/bluez_profile.cpp
+    src/gatt_application.cpp
 )
 
 # 创建可执行文件
@@ -39,6 +38,5 @@ add_executable(macrotooth ${SOURCES})
 target_link_libraries(macrotooth
     ${DBUS_LIBRARIES}
     ${GLIB_LIBRARIES}
-    bluetooth
     pthread
 )
