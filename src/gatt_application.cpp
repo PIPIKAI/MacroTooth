@@ -209,10 +209,15 @@ void GattApplication::setPnpId(uint8_t vid_source, uint16_t vid,
 // ── Public API ────────────────────────────────────────────────────────────────
 
 bool GattApplication::start(const uint8_t* report_desc, size_t len,
-                             const std::string& device_name) {
+                             const std::string& device_name, int hci_index) {
     device_name_ = device_name;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "/org/bluez/hci%d", hci_index);
+    adapter_path_ = buf;
     {
         std::lock_guard<std::mutex> lk(mutex_);
+        report_desc_.assign(report_desc, report_desc + len);
+    }
         report_desc_.assign(report_desc, report_desc + len);
     }
     if (!connectDBus())          return false;
@@ -316,10 +321,10 @@ bool GattApplication::connectDBus() {
 }
 
 bool GattApplication::registerGattApplication() {
-    // org.bluez.GattManager1.RegisterApplication on /org/bluez/hci0
+    // org.bluez.GattManager1.RegisterApplication on the HCI adapter path
     DBusMessage* msg = dbus_message_new_method_call(
         "org.bluez",
-        "/org/bluez/hci0",
+        adapter_path_.c_str(),
         "org.bluez.GattManager1",
         "RegisterApplication");
     if (!msg) {
@@ -355,15 +360,15 @@ bool GattApplication::registerGattApplication() {
     if (reply) dbus_message_unref(reply);
 
     registered_ = true;
-    std::cout << "GATT application registered on /org/bluez/hci0" << std::endl;
+    std::cout << "GATT application registered on " << adapter_path_ << std::endl;
     return true;
 }
 
 bool GattApplication::registerAdvertisement() {
-    // org.bluez.LEAdvertisingManager1.RegisterAdvertisement on /org/bluez/hci0
+    // org.bluez.LEAdvertisingManager1.RegisterAdvertisement on the HCI adapter path
     DBusMessage* msg = dbus_message_new_method_call(
         "org.bluez",
-        "/org/bluez/hci0",
+        adapter_path_.c_str(),
         "org.bluez.LEAdvertisingManager1",
         "RegisterAdvertisement");
     if (!msg) {
@@ -406,7 +411,7 @@ void GattApplication::unregisterAll() {
 
     if (adv_registered_) {
         DBusMessage* msg = dbus_message_new_method_call(
-            "org.bluez", "/org/bluez/hci0",
+            "org.bluez", adapter_path_.c_str(),
             "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement");
         if (msg) {
             dbus_message_append_args(msg,
@@ -424,7 +429,7 @@ void GattApplication::unregisterAll() {
 
     if (registered_) {
         DBusMessage* msg = dbus_message_new_method_call(
-            "org.bluez", "/org/bluez/hci0",
+            "org.bluez", adapter_path_.c_str(),
             "org.bluez.GattManager1", "UnregisterApplication");
         if (msg) {
             const char* app = APP_PATH;
