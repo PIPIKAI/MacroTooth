@@ -111,6 +111,8 @@ int main() {
     // ── BLE GATT application (HID over GATT) ──────────────────────────────
     GattApplication gatt;
 
+    gatt.setPnpId(cfg.pnp_vid_src, cfg.pnp_vid, cfg.pnp_pid, cfg.pnp_version);
+
     if (!gatt.start(hid_report_desc, sizeof(hid_report_desc), cfg.device_name)) {
         LOG_E("Failed to start BLE GATT application");
         return 1;
@@ -134,7 +136,7 @@ int main() {
     hid.setSendCallback([&gatt, &profile](const uint8_t* data, size_t len) -> bool {
         bool ok = gatt.sendInputReport(data, len);
         if (profile.isConnected())
-            ok |= profile.sendInputReport(data, len);
+            profile.sendInputReport(data, len);
         return ok;
     });
 
@@ -150,17 +152,25 @@ int main() {
     // ── IPC server ─────────────────────────────────────────────────────────
     IpcServer ipc;
 
-    ipc.setKeyPressCallback([&hid, &gatt](uint8_t key, uint8_t mod) -> bool {
+    ipc.setKeyPressCallback([&hid, &gatt, &profile](uint8_t key, uint8_t mod) -> bool {
         hid.keyPress(static_cast<HIDReporter::KeyCode>(key),
                      static_cast<HIDReporter::Modifier>(mod));
-        return gatt.sendInputReport(hid.getKeyboardReport(),
+        bool ok = gatt.sendInputReport(hid.getKeyboardReport(),
+                                       hid.getKeyboardReportSize());
+        if (profile.isConnected())
+            profile.sendInputReport(hid.getKeyboardReport(),
                                     hid.getKeyboardReportSize());
+        return ok;
     });
 
-    ipc.setKeyReleaseCallback([&hid, &gatt]() -> bool {
+    ipc.setKeyReleaseCallback([&hid, &gatt, &profile]() -> bool {
         hid.keyRelease();
-        return gatt.sendInputReport(hid.getKeyboardReport(),
+        bool ok = gatt.sendInputReport(hid.getKeyboardReport(),
+                                       hid.getKeyboardReportSize());
+        if (profile.isConnected())
+            profile.sendInputReport(hid.getKeyboardReport(),
                                     hid.getKeyboardReportSize());
+        return ok;
     });
 
     ipc.setTypeCallback([&hid](const std::string& text) -> bool {

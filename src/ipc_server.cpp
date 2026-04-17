@@ -95,7 +95,7 @@ void IpcServer::handleClient(int fd) {
         return;
     }
 
-    char line[4096];
+    char line[1024];
     while (fgets(line, sizeof(line), f)) {
         // Strip trailing CR/LF.
         size_t len = strlen(line);

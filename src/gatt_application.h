@@ -48,6 +48,11 @@ public:
     void setOutputReportCallback(OutputReportCallback cb) { output_cb_ = cb; }
     void setConnectionCallback  (ConnectionCallback   cb) { conn_cb_   = cb; }
 
+    // Override the default PnP ID returned by the Device Information Service.
+    // vid_source: 0x01 = Bluetooth SIG, 0x02 = USB IF.
+    // Call before start().
+    void setPnpId(uint8_t vid_source, uint16_t vid, uint16_t pid, uint16_t version);
+
     // Process pending D-Bus messages.  timeout_ms = 0 → non-blocking.
     void dispatch(int timeout_ms = 0);
 
@@ -83,6 +88,7 @@ private:
     OutputReportCallback output_cb_;
     ConnectionCallback   conn_cb_;
     std::string          device_name_;
+    std::vector<uint8_t> pnp_id_;       // 7-byte PnP ID characteristic value
 
     // State protected by mutex_.
     mutable std::mutex   mutex_;

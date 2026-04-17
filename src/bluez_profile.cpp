@@ -2,6 +2,7 @@
 #include "logger.h"
 #include <iostream>
 #include <cstring>
+#include <cerrno>
 #include <unistd.h>
 #include <thread>
 #include <vector>
@@ -73,13 +74,16 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
                 if (len <= 0) break;
                 LOG_D("BlueZProfile: received %zd bytes from host", len);
             }
-            // Connection closed – clear the stored FD if it is still ours.
+            // Connection closed – clear the stored FD only if it still matches
+            // the one this thread was reading, to avoid closing a newer connection.
             int expected = new_fd;
-            self->interrupt_fd_.compare_exchange_strong(expected, -1);
+            if (self->interrupt_fd_.compare_exchange_strong(expected, -1)) {
+                LOG_I("BlueZProfile: Classic BT HID connection closed");
+                if (self->conn_callback_)
+                    self->conn_callback_(false);
+            }
+            // Always close our copy of the FD regardless of the CAS result.
             close(new_fd);
-            LOG_I("BlueZProfile: Classic BT HID connection closed");
-            if (self->conn_callback_)
-                self->conn_callback_(false);
         }).detach();
 
         // 发送成功响应
@@ -194,11 +198,15 @@ bool BlueZProfile::sendInputReport(const uint8_t* data, size_t len) {
     buf.push_back(0xA1);
     buf.insert(buf.end(), data, data + len);
 
-    ssize_t written = write(fd, buf.data(), buf.size());
-    if (written != static_cast<ssize_t>(buf.size())) {
-        LOG_E("BlueZProfile: sendInputReport write failed (wrote %zd of %zu)",
-              written, buf.size());
-        return false;
+    size_t total   = buf.size();
+    size_t written = 0;
+    while (written < total) {
+        ssize_t ret = write(fd, buf.data() + written, total - written);
+        if (ret < 0) {
+            LOG_E("BlueZProfile: sendInputReport write error: %s", strerror(errno));
+            return false;
+        }
+        written += static_cast<size_t>(ret);
     }
     return true;
 }

@@ -36,10 +36,6 @@ static const uint16_t BLE_APPEARANCE_KEYBOARD = 0x03C1;
 static const uint8_t HID_BCD_LO = 0x11;
 static const uint8_t HID_BCD_HI = 0x01;
 
-// Logitech K380 Multi-Device Keyboard identity.
-// VID source 0x01 = Bluetooth SIG, VID = 0x046D (Logitech), PID = 0xB342 (K380).
-static const uint8_t PNP_ID_BYTES[] = {0x01, 0x6D, 0x04, 0x42, 0xB3, 0x01, 0x00};
-
 // ── Static D-Bus variant / property helpers ───────────────────────────────────
 
 static void appendStrVariant(DBusMessageIter* i, const char* v) {
@@ -180,6 +176,8 @@ GattApplication::GattApplication()
     , registered_(false)
     , adv_registered_(false) {
     input_report_.assign(8, 0);  // 8-byte keyboard report, all zeros
+    // Default PnP ID: Logitech K380 (VID src=BT SIG, VID=0x046D, PID=0xB342, ver=0x0001)
+    pnp_id_ = {0x01, 0x6D, 0x04, 0x42, 0xB3, 0x01, 0x00};
 }
 
 GattApplication::~GattApplication() {
@@ -188,6 +186,24 @@ GattApplication::~GattApplication() {
         dbus_connection_unref(conn_);
         conn_ = nullptr;
     }
+}
+
+void GattApplication::setPnpId(uint8_t vid_source, uint16_t vid,
+                                 uint16_t pid, uint16_t version) {
+    // PnP ID format (7 bytes, all values little-endian):
+    //   byte 0   : Vendor ID Source
+    //   bytes 1-2: Vendor ID
+    //   bytes 3-4: Product ID
+    //   bytes 5-6: Product Version
+    pnp_id_ = {
+        vid_source,
+        static_cast<uint8_t>(vid & 0xFF),
+        static_cast<uint8_t>((vid >> 8) & 0xFF),
+        static_cast<uint8_t>(pid & 0xFF),
+        static_cast<uint8_t>((pid >> 8) & 0xFF),
+        static_cast<uint8_t>(version & 0xFF),
+        static_cast<uint8_t>((version >> 8) & 0xFF)
+    };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -681,7 +697,7 @@ void GattApplication::appendManagedObjects(DBusMessage* reply) {
         propStr(&props, "UUID",    UUID_PNP_ID);
         propObj(&props, "Service", SVC1_PATH);
         propAs (&props, "Flags",   flags, 1);
-        propAy (&props, "Value",   PNP_ID_BYTES, sizeof(PNP_ID_BYTES));
+        propAy (&props, "Value",   pnp_id_.data(), pnp_id_.size());
         endIface(&iface_arr, &iface_e, &props);
         endObj  (&outer, &obj_e, &iface_arr);
     }
@@ -718,8 +734,7 @@ DBusMessage* GattApplication::handleCharacteristicRead(DBusMessage* msg,
             value.assign(reinterpret_cast<const uint8_t*>(MFR_NAME),
                          reinterpret_cast<const uint8_t*>(MFR_NAME) + strlen(MFR_NAME));
         } else if (strcmp(path, CHAR6_PATH) == 0) {
-            value.assign(PNP_ID_BYTES,
-                         PNP_ID_BYTES + sizeof(PNP_ID_BYTES));
+            value = pnp_id_;
         }
     }
 
