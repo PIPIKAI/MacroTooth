@@ -218,8 +218,6 @@ bool GattApplication::start(const uint8_t* report_desc, size_t len,
         std::lock_guard<std::mutex> lk(mutex_);
         report_desc_.assign(report_desc, report_desc + len);
     }
-        report_desc_.assign(report_desc, report_desc + len);
-    }
     if (!connectDBus())          return false;
     if (!registerGattApplication()) return false;
     if (!registerAdvertisement())   return false;
