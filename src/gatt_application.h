@@ -34,8 +34,11 @@ public:
     // Connect to D-Bus, register GATT application and LE advertisement.
     // report_desc / report_desc_len: HID Report Descriptor bytes.
     // device_name: local name shown in the BLE advertisement.
+    // hci_index: HCI adapter index (0 → /org/bluez/hci0).  Must match the
+    //            index passed to BluetoothAdapter::init().
     bool start(const uint8_t* report_desc, size_t report_desc_len,
-               const std::string& device_name = "MacroTooth Keyboard");
+               const std::string& device_name = "MacroTooth Keyboard",
+               int hci_index = 0);
 
     // Unregister advertisement and GATT application, disconnect from D-Bus.
     void stop();
@@ -85,6 +88,7 @@ private:
     void appendManagedObjects(DBusMessage* reply);
 
     DBusConnection*      conn_;
+    std::string          adapter_path_;  // e.g. /org/bluez/hci0
     OutputReportCallback output_cb_;
     ConnectionCallback   conn_cb_;
     std::string          device_name_;

@@ -113,7 +113,8 @@ int main() {
 
     gatt.setPnpId(cfg.pnp_vid_src, cfg.pnp_vid, cfg.pnp_pid, cfg.pnp_version);
 
-    if (!gatt.start(hid_report_desc, sizeof(hid_report_desc), cfg.device_name)) {
+    if (!gatt.start(hid_report_desc, sizeof(hid_report_desc),
+                    cfg.device_name, cfg.hci_index)) {
         LOG_E("Failed to start BLE GATT application");
         return 1;
     }
