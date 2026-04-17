@@ -22,4 +22,4 @@ backend/data/macros/*
 # Virtual environment
 venv/
 
-build/
+build/build_ci/
