@@ -135,8 +135,8 @@ int main() {
 
     hid.setSendCallback([&gatt, &profile](const uint8_t* data, size_t len) -> bool {
         bool ok = gatt.sendInputReport(data, len);
-        if (profile.isConnected())
-            profile.sendInputReport(data, len);
+        if (profile.isConnected() && !profile.sendInputReport(data, len))
+            LOG_W("Failed to send HID report over Classic BT");
         return ok;
     });
 

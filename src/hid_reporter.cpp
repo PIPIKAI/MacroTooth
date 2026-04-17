@@ -74,12 +74,17 @@ void HIDReporter::typeString(const std::string& text, int delay_ms) {
             
             std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
             
-            // Release
+            // Release – a brief inter-character gap improves reliability on
+            // hosts that sample reports at discrete intervals.
             keyRelease();
             if (send_cb_)
                 send_cb_(keyboard_report_.data(), keyboard_report_.size());
             
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+            // Use a shorter gap (half of delay_ms, minimum 10 ms) between
+            // release and the next press so overall typing speed stays close
+            // to the original single-delay behaviour.
+            int release_gap = std::max(delay_ms / 2, 10);
+            std::this_thread::sleep_for(std::chrono::milliseconds(release_gap));
         }
     }
 }

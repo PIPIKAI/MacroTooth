@@ -198,11 +198,14 @@ bool BluetoothAdapter::setClassOfDevice(uint32_t cod) {
     // The Class property is read-only in org.bluez.Adapter1; set it via
     // hciconfig which writes directly to the HCI layer.
     // Validate hci_name_ matches "hci<digits>" to prevent command injection.
-    if (hci_name_.size() < 4 || hci_name_.substr(0, 3) != "hci")
+    // Also cap the numeric suffix to a reasonable range (0–99).
+    if (hci_name_.size() < 4 || hci_name_.size() > 6 || hci_name_.substr(0, 3) != "hci")
         return false;
     for (size_t i = 3; i < hci_name_.size(); ++i) {
         if (hci_name_[i] < '0' || hci_name_[i] > '9') return false;
     }
+    // cod is a uint32_t – it cannot contain shell metacharacters; formatting
+    // it via snprintf with %06X is safe.
     char cmd[64];
     snprintf(cmd, sizeof(cmd), "hciconfig %s class 0x%06X",
              hci_name_.c_str(), cod);

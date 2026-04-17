@@ -80,8 +80,9 @@ void IpcServer::acceptLoop() {
             break;
         }
         LOG_D("IpcServer: new client fd=%d", client);
-        // Handle each client in its own detached thread so the accept loop
-        // stays responsive.
+        // Each client runs in its own detached thread.  On stop() the server
+        // socket is closed so accept() unblocks; in-progress client handlers
+        // will finish naturally when their client closes the connection.
         std::thread([this, client]() {
             handleClient(client);
         }).detach();

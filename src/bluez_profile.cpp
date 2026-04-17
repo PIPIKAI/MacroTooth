@@ -75,7 +75,10 @@ DBusHandlerResult BlueZProfile::messageHandler(DBusConnection* conn,
                 LOG_D("BlueZProfile: received %zd bytes from host", len);
             }
             // Connection closed – clear the stored FD only if it still matches
-            // the one this thread was reading, to avoid closing a newer connection.
+            // the one this thread was reading, to avoid clearing a newer FD.
+            // If the CAS fails it means a new connection replaced this one;
+            // the disconnect callback is implicitly handled when that newer
+            // connection eventually closes.
             int expected = new_fd;
             if (self->interrupt_fd_.compare_exchange_strong(expected, -1)) {
                 LOG_I("BlueZProfile: Classic BT HID connection closed");
